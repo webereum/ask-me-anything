@@ -77,11 +77,15 @@ CREATE TABLE IF NOT EXISTS questions (
   ip_address TEXT,
   user_agent TEXT,
   referrer TEXT,
+  user_id TEXT,
   created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
   is_answered BOOLEAN DEFAULT false,
   answer_text TEXT,
   answered_at TIMESTAMPTZ
 );
+
+-- Add user_id column if it doesn't exist (for existing tables)
+ALTER TABLE questions ADD COLUMN IF NOT EXISTS user_id TEXT;
 
 -- Create creator_profiles table
 CREATE TABLE IF NOT EXISTS creator_profiles (

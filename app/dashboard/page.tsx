@@ -1,11 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
+import { useAuth, useUser } from '@clerk/nextjs';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { GlassmorphicCard3D } from '@/components/glassmorphic-card-3d';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import toast, { Toaster } from 'react-hot-toast';
 import {
   MessageSquare,
@@ -16,59 +22,152 @@ import {
   CheckCircle,
   XCircle,
   RefreshCw,
-  TrendingUp
+  TrendingUp,
+  User,
+  Settings,
+  LogOut,
+  Shield,
+  BarChart3,
+  Users,
+  Eye,
+  Calendar,
+  Plus
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 interface Question {
   id: string;
-  question_text: string;
-  source_identifier: string;
-  ip_address: string;
-  user_agent: string;
-  referrer: string;
+  question: string;
+  answer?: string;
+  status: 'pending' | 'answered';
   created_at: string;
-  is_answered: boolean;
-  answer_text: string | null;
-  answered_at: string | null;
+  source: string;
+  referrer?: string;
+  user_agent?: string;
+  user_id?: string;
 }
 
-export default function DashboardPage() {
+interface UserStats {
+  totalQuestions: number;
+  answeredQuestions: number;
+  pendingQuestions: number;
+  totalViews: number;
+  thisWeekQuestions: number;
+  responseRate: number;
+}
+
+export default function Dashboard() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
+  const [answers, setAnswers] = useState<{ [key: string]: string }>({});
   const [answeringId, setAnsweringId] = useState<string | null>(null);
-  const [answerText, setAnswerText] = useState('');
+  const [userStats, setUserStats] = useState<UserStats>({
+    totalQuestions: 0,
+    answeredQuestions: 0,
+    pendingQuestions: 0,
+    totalViews: 0,
+    thisWeekQuestions: 0,
+    responseRate: 0
+  });
+  const [activeTab, setActiveTab] = useState('overview');
+  
+  // Authentication hooks
+  const { data: session } = useSession();
+  const { isSignedIn, userId: clerkUserId } = useAuth();
+  const { user: clerkUser } = useUser();
+  const router = useRouter();
+  
+  const supabase = createClient();
+  
+  // Get current user info
+  const currentUser = session?.user || clerkUser;
+  const currentUserId = (session?.user as any)?.id || clerkUserId;
+  
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!session && !isSignedIn) {
+      router.push('/login');
+    }
+  }, [session, isSignedIn, router]);
 
   const fetchQuestions = async () => {
+    if (!currentUserId) return;
+    
     try {
-      const supabase = createClient();
+      setLoading(true);
       const { data, error } = await supabase
         .from('questions')
         .select('*')
+        .eq('user_id', currentUserId)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setQuestions(data || []);
+      if (error) {
+        console.error('Error fetching questions:', error);
+        toast.error('Failed to fetch questions');
+        return;
+      }
+
+      const formattedQuestions: Question[] = data.map(q => ({
+        id: q.id,
+        question: q.question_text,
+        answer: q.answer_text,
+        status: q.is_answered ? 'answered' : 'pending',
+        created_at: q.created_at,
+        source: q.source_identifier,
+        referrer: q.referrer,
+        user_agent: q.user_agent,
+        user_id: q.user_id
+      }));
+
+      setQuestions(formattedQuestions);
+      calculateStats(formattedQuestions);
     } catch (error) {
-      console.error('Error fetching questions:', error);
-      toast.error('Failed to load questions');
+      console.error('Error:', error);
+      toast.error('Failed to fetch questions');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchQuestions();
+  const calculateStats = (questions: Question[]) => {
+    const total = questions.length;
+    const answered = questions.filter(q => q.status === 'answered').length;
+    const pending = total - answered;
+    const responseRate = total > 0 ? Math.round((answered / total) * 100) : 0;
+    
+    // Calculate this week's questions
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const thisWeek = questions.filter(q => new Date(q.created_at) > oneWeekAgo).length;
+    
+    setUserStats({
+      totalQuestions: total,
+      answeredQuestions: answered,
+      pendingQuestions: pending,
+      totalViews: total * 3, // Simulated view count
+      thisWeekQuestions: thisWeek,
+      responseRate
+    });
+  };
 
-    const supabase = createClient();
+  useEffect(() => {
+    if (currentUserId) {
+      fetchQuestions();
+    }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    
     const channel = supabase
-      .channel('questions-changes')
+      .channel('questions_changes')
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'questions',
+          filter: `user_id=eq.${currentUserId}`
         },
         () => {
           fetchQuestions();
@@ -79,30 +178,34 @@ export default function DashboardPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [currentUserId]);
 
   const handleAnswer = async (questionId: string) => {
-    if (!answerText.trim()) {
+    const answerText = answers[questionId];
+    if (!answerText?.trim()) {
       toast.error('Please enter an answer');
       return;
     }
 
     try {
-      const supabase = createClient();
       const { error } = await supabase
         .from('questions')
         .update({
-          is_answered: true,
           answer_text: answerText,
-          answered_at: new Date().toISOString(),
+          is_answered: true,
+          answered_at: new Date().toISOString()
         })
-        .eq('id', questionId);
+        .eq('id', questionId)
+        .eq('user_id', currentUserId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error saving answer:', error);
+        toast.error('Failed to save answer');
+        return;
+      }
 
       toast.success('Answer saved successfully!');
-      setAnsweringId(null);
-      setAnswerText('');
+      setAnswers(prev => ({ ...prev, [questionId]: '' }));
       fetchQuestions();
     } catch (error) {
       console.error('Error:', error);
@@ -110,195 +213,371 @@ export default function DashboardPage() {
     }
   };
 
-  const stats = {
-    total: questions.length,
-    answered: questions.filter(q => q.is_answered).length,
-    unanswered: questions.filter(q => !q.is_answered).length,
-  };
-
-  if (loading) {
+  // Show loading or redirect if not authenticated
+  if (!session && !isSignedIn) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-16 h-16 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin mx-auto" />
-          <p className="text-white/70 text-lg">Loading questions...</p>
+      <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
+        <div className="text-white text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+          <p>Redirecting to login...</p>
         </div>
       </div>
     );
   }
 
+  const handleSignOut = () => {
+    if (session) {
+      // NextAuth sign out
+      window.location.href = '/api/auth/signout';
+    } else {
+      // Clerk sign out
+      router.push('/');
+    }
+  };
+
+  const StatCard = ({ title, value, icon: Icon, trend, trendValue }: {
+    title: string;
+    value: string | number;
+    icon: any;
+    trend?: 'up' | 'down';
+    trendValue?: string;
+  }) => (
+    <Card className="bg-white/5 border-white/20 backdrop-blur-sm">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-white/70 text-sm font-medium">{title}</p>
+            <p className="text-white text-2xl font-bold">{value}</p>
+            {trend && trendValue && (
+              <div className={`flex items-center mt-1 text-sm ${
+                trend === 'up' ? 'text-green-400' : 'text-red-400'
+              }`}>
+                <TrendingUp className={`h-4 w-4 mr-1 ${trend === 'down' ? 'rotate-180' : ''}`} />
+                {trendValue}
+              </div>
+            )}
+          </div>
+          <Icon className="h-8 w-8 text-white/50" />
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   return (
-    <div className="min-h-screen p-4 md:p-8">
-      <Toaster position="bottom-center" />
-
-      <div className="max-w-7xl mx-auto space-y-8">
-        <div className="text-center space-y-4">
-          <h1 className="text-4xl md:text-6xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-            Admin Dashboard
-          </h1>
-          <p className="text-white/70 text-lg">Manage and answer your questions</p>
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center space-x-4">
+            <Avatar className="h-12 w-12">
+              <AvatarImage src={(currentUser as any)?.image || (currentUser as any)?.imageUrl} />
+              <AvatarFallback className="bg-white/10 text-white">
+                {(currentUser as any)?.name?.[0] || (currentUser as any)?.firstName?.[0] || 'U'}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <h1 className="text-2xl font-bold text-white">
+                Welcome back, {(currentUser as any)?.name || (currentUser as any)?.firstName || 'User'}!
+              </h1>
+              <p className="text-white/70">Manage your Ask Me Anything dashboard</p>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              onClick={() => router.push('/chat')}
+              className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+            >
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Chat
+            </Button>
+            <Button
+              onClick={handleSignOut}
+              variant="outline"
+              className="bg-white/5 hover:bg-white/10 text-white border-white/20"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Sign Out
+            </Button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <GlassmorphicCard3D>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-white/70">
-                <MessageSquare className="w-5 h-5" />
-                <span className="text-sm font-medium">Total Questions</span>
-              </div>
-              <p className="text-4xl font-bold text-white">{stats.total}</p>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="bg-white/10 border-white/20">
+            <TabsTrigger value="overview" className="data-[state=active]:bg-white/20 text-white">
+              <BarChart3 className="h-4 w-4 mr-2" />
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value="questions" className="data-[state=active]:bg-white/20 text-white">
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Questions
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="data-[state=active]:bg-white/20 text-white">
+              <Settings className="h-4 w-4 mr-2" />
+              Settings
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="overview" className="space-y-6">
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <StatCard
+                title="Total Questions"
+                value={userStats.totalQuestions}
+                icon={MessageSquare}
+                trend="up"
+                trendValue={`+${userStats.thisWeekQuestions} this week`}
+              />
+              <StatCard
+                title="Answered"
+                value={userStats.answeredQuestions}
+                icon={CheckCircle}
+                trend="up"
+                trendValue={`${userStats.responseRate}% response rate`}
+              />
+              <StatCard
+                title="Pending"
+                value={userStats.pendingQuestions}
+                icon={Clock}
+              />
+              <StatCard
+                title="Total Views"
+                value={userStats.totalViews}
+                icon={Eye}
+                trend="up"
+                trendValue="+12% this month"
+              />
             </div>
-          </GlassmorphicCard3D>
 
-          <GlassmorphicCard3D>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-green-400">
-                <CheckCircle className="w-5 h-5" />
-                <span className="text-sm font-medium">Answered</span>
-              </div>
-              <p className="text-4xl font-bold text-white">{stats.answered}</p>
-            </div>
-          </GlassmorphicCard3D>
-
-          <GlassmorphicCard3D>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-yellow-400">
-                <Clock className="w-5 h-5" />
-                <span className="text-sm font-medium">Pending</span>
-              </div>
-              <p className="text-4xl font-bold text-white">{stats.unanswered}</p>
-            </div>
-          </GlassmorphicCard3D>
-        </div>
-
-        <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-bold text-white">Recent Questions</h2>
-          <Button
-            onClick={fetchQuestions}
-            variant="outline"
-            className="bg-white/5 border-white/20 text-white hover:bg-white/10"
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-
-        <div className="space-y-6">
-          {questions.length === 0 ? (
-            <GlassmorphicCard3D>
-              <div className="text-center py-12 space-y-4">
-                <MessageSquare className="w-16 h-16 text-white/30 mx-auto" />
-                <h3 className="text-xl font-semibold text-white">No questions yet</h3>
-                <p className="text-white/60">Questions will appear here when users submit them</p>
-              </div>
-            </GlassmorphicCard3D>
-          ) : (
-            questions.map((question) => (
-              <GlassmorphicCard3D key={question.id}>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-start gap-4">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge
-                          variant={question.is_answered ? "default" : "secondary"}
-                          className={question.is_answered
-                            ? "bg-green-500/20 text-green-300 border-green-500/30"
-                            : "bg-yellow-500/20 text-yellow-300 border-yellow-500/30"
-                          }
-                        >
-                          {question.is_answered ? (
-                            <><CheckCircle className="w-3 h-3 mr-1" /> Answered</>
-                          ) : (
-                            <><Clock className="w-3 h-3 mr-1" /> Pending</>
-                          )}
-                        </Badge>
-                        <Badge variant="outline" className="bg-cyan-500/10 text-cyan-300 border-cyan-500/30">
-                          <TrendingUp className="w-3 h-3 mr-1" />
-                          {question.source_identifier}
-                        </Badge>
-                      </div>
-
-                      <p className="text-white text-lg leading-relaxed">
-                        {question.question_text}
-                      </p>
-
-                      <div className="flex flex-wrap gap-4 text-sm text-white/50">
-                        <div className="flex items-center gap-1">
-                          <Clock className="w-4 h-4" />
-                          {formatDistanceToNow(new Date(question.created_at), { addSuffix: true })}
-                        </div>
-                        {question.referrer && question.referrer !== 'direct' && (
-                          <div className="flex items-center gap-1">
-                            <ExternalLink className="w-4 h-4" />
-                            {new URL(question.referrer).hostname}
-                          </div>
-                        )}
-                        {question.user_agent && (
-                          <div className="flex items-center gap-1">
-                            <Monitor className="w-4 h-4" />
-                            {question.user_agent.includes('Mobile') ? 'Mobile' : 'Desktop'}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+            {/* Recent Activity */}
+            <Card className="bg-white/5 border-white/20 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center">
+                  <Calendar className="h-5 w-5 mr-2" />
+                  Recent Questions
+                </CardTitle>
+                <CardDescription className="text-white/70">
+                  Your latest questions and their status
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {loading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-white/50" />
                   </div>
+                ) : questions.length === 0 ? (
+                  <div className="text-center py-8">
+                    <MessageSquare className="h-12 w-12 text-white/30 mx-auto mb-4" />
+                    <p className="text-white/70">No questions yet</p>
+                    <p className="text-white/50 text-sm">Share your Ask Me Anything link to start receiving questions!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {questions.slice(0, 5).map((question) => (
+                      <div key={question.id} className="flex items-start space-x-4 p-4 bg-white/5 rounded-lg">
+                        <div className="flex-shrink-0">
+                          {question.status === 'answered' ? (
+                            <CheckCircle className="h-5 w-5 text-green-400" />
+                          ) : (
+                            <Clock className="h-5 w-5 text-yellow-400" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-medium truncate">
+                            {question.question}
+                          </p>
+                          <div className="flex items-center space-x-4 mt-1 text-xs text-white/50">
+                            <span>{formatDistanceToNow(new Date(question.created_at))} ago</span>
+                            <span>from {question.source}</span>
+                          </div>
+                        </div>
+                        <Badge variant={question.status === 'answered' ? 'default' : 'secondary'}>
+                          {question.status}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-                  {question.is_answered && question.answer_text && (
-                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                      <p className="text-sm font-medium text-green-300 mb-2">Your Answer:</p>
-                      <p className="text-white/90">{question.answer_text}</p>
-                    </div>
-                  )}
+          <TabsContent value="questions" className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-white">All Questions</h2>
+              <Button
+                onClick={fetchQuestions}
+                disabled={loading}
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
 
-                  {!question.is_answered && (
-                    <div className="space-y-3">
-                      {answeringId === question.id ? (
-                        <>
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="h-8 w-8 animate-spin text-white/50" />
+              </div>
+            ) : questions.length === 0 ? (
+              <Card className="bg-white/5 border-white/20 backdrop-blur-sm">
+                <CardContent className="text-center py-12">
+                  <MessageSquare className="h-16 w-16 text-white/30 mx-auto mb-4" />
+                  <h3 className="text-white text-lg font-medium mb-2">No questions yet</h3>
+                  <p className="text-white/70 mb-6">Share your Ask Me Anything link to start receiving questions!</p>
+                  <Button
+                    onClick={() => router.push('/create-ama')}
+                    className="bg-purple-600 hover:bg-purple-700 text-white"
+                  >
+                    <Plus className="h-4 w-4 mr-2" />
+                    Create AMA Link
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {questions.map((question) => (
+                  <GlassmorphicCard3D key={question.id} className="p-6">
+                    <div className="space-y-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <Badge variant={question.status === 'answered' ? 'default' : 'secondary'}>
+                              {question.status === 'answered' ? (
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                              ) : (
+                                <Clock className="h-3 w-3 mr-1" />
+                              )}
+                              {question.status}
+                            </Badge>
+                            <span className="text-white/50 text-sm">
+                              {formatDistanceToNow(new Date(question.created_at))} ago
+                            </span>
+                          </div>
+                          <h3 className="text-white font-medium text-lg mb-2">
+                            {question.question}
+                          </h3>
+                          <div className="flex items-center space-x-4 text-sm text-white/50">
+                            <div className="flex items-center">
+                              <MapPin className="h-4 w-4 mr-1" />
+                              {question.source}
+                            </div>
+                            {question.referrer && (
+                              <div className="flex items-center">
+                                <ExternalLink className="h-4 w-4 mr-1" />
+                                {new URL(question.referrer).hostname}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {question.status === 'answered' && question.answer ? (
+                        <div className="bg-white/5 rounded-lg p-4">
+                          <h4 className="text-white/80 font-medium mb-2">Your Answer:</h4>
+                          <p className="text-white">{question.answer}</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
                           <Textarea
                             placeholder="Type your answer..."
-                            value={answerText}
-                            onChange={(e) => setAnswerText(e.target.value)}
+                            value={answers[question.id] || ''}
+                            onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: e.target.value }))}
                             className="bg-white/5 border-white/20 text-white placeholder:text-white/50"
                             rows={4}
                           />
-                          <div className="flex gap-2">
+                          <div className="flex space-x-2">
                             <Button
                               onClick={() => handleAnswer(question.id)}
-                              className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
+                              disabled={!answers[question.id]?.trim()}
+                              className="bg-green-600 hover:bg-green-700 text-white"
                             >
-                              <CheckCircle className="w-4 h-4 mr-2" />
+                              <CheckCircle className="h-4 w-4 mr-2" />
                               Save Answer
                             </Button>
                             <Button
                               variant="outline"
-                              onClick={() => {
-                                setAnsweringId(null);
-                                setAnswerText('');
-                              }}
+                              onClick={() => setAnswers(prev => ({ ...prev, [question.id]: '' }))}
                               className="bg-white/5 border-white/20 text-white hover:bg-white/10"
                             >
-                              <XCircle className="w-4 h-4 mr-2" />
-                              Cancel
+                              Clear
                             </Button>
                           </div>
-                        </>
-                      ) : (
-                        <Button
-                          onClick={() => setAnsweringId(question.id)}
-                          variant="outline"
-                          className="bg-white/5 border-white/20 text-white hover:bg-white/10"
-                        >
-                          Answer Question
-                        </Button>
+                        </div>
                       )}
                     </div>
-                  )}
+                  </GlassmorphicCard3D>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="settings" className="space-y-6">
+            <Card className="bg-white/5 border-white/20 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center">
+                  <User className="h-5 w-5 mr-2" />
+                  Profile Settings
+                </CardTitle>
+                <CardDescription className="text-white/70">
+                  Manage your account and preferences
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center space-x-4">
+                  <Avatar className="h-16 w-16">
+                    <AvatarImage src={(currentUser as any)?.image || (currentUser as any)?.imageUrl} />
+                    <AvatarFallback className="bg-white/10 text-white text-xl">
+                      {(currentUser as any)?.name?.[0] || (currentUser as any)?.firstName?.[0] || 'U'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <h3 className="text-white font-medium">
+                      {(currentUser as any)?.name || `${(currentUser as any)?.firstName} ${(currentUser as any)?.lastName}` || 'User'}
+                    </h3>
+                    <p className="text-white/70">{(currentUser as any)?.email}</p>
+                  </div>
                 </div>
-              </GlassmorphicCard3D>
-            ))
-          )}
-        </div>
+                
+                <div className="pt-4 border-t border-white/20">
+                  <h4 className="text-white font-medium mb-4">Quick Actions</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Button
+                      onClick={() => router.push('/')}
+                      className="bg-white/10 hover:bg-white/20 text-white border-white/20 justify-start"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create New AMA
+                    </Button>
+                    <Button
+                      onClick={() => router.push('/chat')}
+                      className="bg-white/10 hover:bg-white/20 text-white border-white/20 justify-start"
+                    >
+                      <MessageSquare className="h-4 w-4 mr-2" />
+                      Join Chat
+                    </Button>
+                    <Button
+                      onClick={() => router.push('/threads')}
+                      className="bg-white/10 hover:bg-white/20 text-white border-white/20 justify-start"
+                    >
+                      <Users className="h-4 w-4 mr-2" />
+                      Community Threads
+                    </Button>
+                    <Button
+                      onClick={handleSignOut}
+                      variant="outline"
+                      className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/20 justify-start"
+                    >
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Sign Out
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
+      <Toaster position="top-right" />
     </div>
   );
 }

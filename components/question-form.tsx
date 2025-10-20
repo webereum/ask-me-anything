@@ -5,13 +5,20 @@ import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { GlassmorphicCard3D } from './glassmorphic-card-3d';
 import toast from 'react-hot-toast';
-import { Send, CheckCircle2 } from 'lucide-react';
+import { Send, CheckCircle2, Link } from 'lucide-react';
 
-export function QuestionForm() {
+interface QuestionFormProps {
+  targetUserId?: string;
+  targetUsername?: string;
+}
+
+export function QuestionForm({ targetUserId, targetUsername }: QuestionFormProps) {
   const [question, setQuestion] = useState('');
+  const [reelUrl, setReelUrl] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const searchParams = useSearchParams();
@@ -34,10 +41,12 @@ export function QuestionForm() {
 
       const trackingData = {
         question_text: question.trim(),
+        reel_url: reelUrl.trim() || null,
         source_identifier: `${source}-${from}`,
         user_agent: navigator.userAgent,
         referrer: document.referrer || 'direct',
         created_at: new Date().toISOString(),
+        user_id: targetUserId || null, // Add user_id for user-specific questions
       };
 
       const { error } = await supabase
@@ -58,6 +67,7 @@ export function QuestionForm() {
 
       setTimeout(() => {
         setQuestion('');
+        setReelUrl('');
         setIsSuccess(false);
       }, 3000);
 
@@ -76,7 +86,10 @@ export function QuestionForm() {
   };
 
   return (
-    <GlassmorphicCard3D title="Ask Me Anything" className="max-w-2xl mx-auto">
+    <GlassmorphicCard3D 
+      title={targetUsername ? `Ask ${targetUsername} Anything` : "Ask Me Anything"} 
+      className="max-w-2xl mx-auto"
+    >
       {isSuccess ? (
         <div className="text-center py-12 space-y-4">
           <div className="flex justify-center">
@@ -95,7 +108,7 @@ export function QuestionForm() {
             </Label>
             <Textarea
               id="question"
-              placeholder="Ask me anything... Your question is completely anonymous! 🎭"
+              placeholder={targetUsername ? `Ask ${targetUsername} anything... Your question is completely anonymous! 🎭` : "Ask me anything... Your question is completely anonymous! 🎭"}
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
               disabled={isSubmitting}
@@ -114,6 +127,25 @@ export function QuestionForm() {
                 {question.length}/500
               </p>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="reelUrl" className="text-white/90 text-lg font-medium flex items-center gap-2">
+              <Link className="w-4 h-4" />
+              Reel URL (Optional)
+            </Label>
+            <Input
+              id="reelUrl"
+              type="url"
+              placeholder="https://www.instagram.com/reel/... or https://youtube.com/shorts/..."
+              value={reelUrl}
+              onChange={(e) => setReelUrl(e.target.value)}
+              disabled={isSubmitting}
+              className="bg-white/5 border-white/20 text-white placeholder:text-white/50 focus:border-cyan-400 focus:ring-cyan-400 text-lg rounded-xl transition-all duration-300"
+            />
+            <p className="text-xs text-white/60">
+              Share a reel or short video related to your question (Instagram, YouTube Shorts, TikTok, etc.)
+            </p>
           </div>
 
           <Button
