@@ -1,395 +1,229 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { NavigationLink } from '@/components/navigation-link';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
-import { useAuth } from '@/lib/auth/auth-context';
-import {
-  MessageSquare,
-  LayoutDashboard,
-  MessageCircle,
-  UserPlus,
-  LogIn,
-  Settings,
-  Home,
-  Menu,
-  X,
-  Sparkles,
-  Users,
-  Bell,
-  HelpCircle,
-  User,
-  LogOut,
-  Plus
-} from 'lucide-react';
+import { Menu, X, MessageCircle, Plus, Home, User, LogOut, Settings, Users } from 'lucide-react';
+import { useAuth } from '@clerk/nextjs';
+import { useAuth as useAppAuth } from '@/lib/auth/auth-context';
+import { SignInButton, SignOutButton, UserButton } from '@clerk/nextjs';
 
-// Public links that appear in the main navbar
-const publicNavigationItems = [
-  {
-    name: 'Home',
-    href: '/',
-    icon: Home,
-    description: 'Ask questions anonymously'
-  },
-  {
-    name: 'Community',
-    href: '/community',
-    icon: Users,
-    description: 'Connect with others'
-  },
-  {
-    name: 'Help',
-    href: '/help',
-    icon: HelpCircle,
-    description: 'Get support'
-  },
-  {
-    name: 'About',
-    href: '/about',
-    icon: Sparkles,
-    description: 'Learn more about us'
-  }
+const publicNavItems = [
+  { href: '/', label: 'Home', icon: Home, description: 'Go to homepage' },
+  { href: '/chat', label: 'Chat', icon: MessageCircle, description: 'Join public chat' },
+  { href: '/community', label: 'Community', icon: Users, description: 'Community hub' },
+  { href: '/help', label: 'Help', icon: Settings, description: 'Get help and support' },
 ];
 
-// Private/authenticated links that appear in the sidebar
-const privateNavigationItems = [
-  {
-    name: 'Dashboard',
-    href: '/dashboard',
-    icon: LayoutDashboard,
-    description: 'Manage your questions',
-    requiresAuth: true
-  },
-  {
-    name: 'Live Chat',
-    href: '/chat',
-    icon: MessageCircle,
-    description: 'Real-time messaging',
-    requiresAuth: true
-  },
-  {
-    name: 'Threads',
-    href: '/threads',
-    icon: MessageSquare,
-    description: 'Community discussions',
-    requiresAuth: false
-  },
-  {
-    name: 'Create AMA',
-    href: '/create-ama',
-    icon: Plus,
-    description: 'Start your own AMA page',
-    requiresAuth: true
-  },
-  {
-    name: 'Notifications',
-    href: '/notifications',
-    icon: Bell,
-    description: 'Stay updated',
-    requiresAuth: true
-  },
-  {
-    name: 'Settings',
-    href: '/settings',
-    icon: Settings,
-    description: 'Account settings',
-    requiresAuth: true
-  }
+const privateNavItems = [
+  { href: '/dashboard', label: 'Dashboard', icon: User, description: 'Your dashboard' },
+  { href: '/create-ama', label: 'Create AMA', icon: Plus, description: 'Create new AMA session' },
+  { href: '/chat', label: 'Chat', icon: MessageCircle, description: 'Join chat rooms' },
+  { href: '/community', label: 'Community', icon: Users, description: 'Community hub' },
+  { href: '/help', label: 'Help', icon: Settings, description: 'Get help and support' },
 ];
 
 export default function Navigation() {
   const [isOpen, setIsOpen] = useState(false);
   const pathname = usePathname();
-  const { user, isAuthenticated, isLoading, signOut } = useAuth();
+  const { isSignedIn, isLoaded } = useAuth();
+  const { isAuthenticated } = useAppAuth();
 
-  const isActive = (href: string) => {
-    if (href === '/') {
-      return pathname === '/';
-    }
-    return pathname.startsWith(href);
-  };
+  const isActive = (href: string) => pathname === href;
+  const navItems = (isSignedIn || isAuthenticated) ? privateNavItems : publicNavItems;
 
-  const handleSignOut = async () => {
-    await signOut();
-    setIsOpen(false);
-  };
+  const closeSheet = () => setIsOpen(false);
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-white/10 bg-black/20 backdrop-blur-xl">
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex h-16 items-center justify-between">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-black/20 backdrop-blur-md border-b border-white/10">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <NavigationLink href="/" className="flex items-center space-x-2">
-            <div className="relative">
-              <MessageSquare className="h-8 w-8 text-cyan-400" />
-              <Sparkles className="absolute -top-1 -right-1 h-4 w-4 text-purple-400" />
+          <Link href="/" className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-lg flex items-center justify-center">
+              <MessageCircle className="w-5 h-5 text-white" />
             </div>
             <span className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
               AskMe
             </span>
-          </NavigationLink>
+          </Link>
 
-          {/* Desktop Public Navigation */}
-          <nav className="hidden md:flex items-center space-x-1">
-            {publicNavigationItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <NavigationLink
-                  key={item.name}
-                  href={item.href}
-                  className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    isActive(item.href)
-                      ? 'bg-white/10 text-white shadow-lg'
-                      : 'text-white/70 hover:text-white hover:bg-white/5'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span>{item.name}</span>
-                </NavigationLink>
-              );
-            })}
-          </nav>
+          {/* Desktop Navigation */}
+          <div className="hidden md:flex items-center space-x-8">
+            {navItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  isActive(item.href)
+                    ? 'bg-white/10 text-white'
+                    : 'text-gray-300 hover:text-white hover:bg-white/5'
+                }`}
+                title={item.description}
+              >
+                <item.icon className="w-4 h-4" />
+                <span>{item.label}</span>
+              </Link>
+            ))}
+          </div>
 
-          {/* Desktop Auth Buttons and Sidebar Trigger */}
-          <div className="hidden md:flex items-center space-x-2">
-            {!isLoading && (
+          {/* Desktop Auth */}
+          <div className="hidden md:flex items-center space-x-4">
+            {isLoaded && (
               <>
-                {!isAuthenticated ? (
-                  <>
-                    <NavigationLink href="/login">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="bg-white/5 border-white/20 text-white hover:bg-white/10"
-                      >
-                        <LogIn className="h-4 w-4 mr-2" />
-                        Sign In
-                      </Button>
-                    </NavigationLink>
-                    <NavigationLink href="/signup">
-                      <Button
-                        variant="default"
-                        size="sm"
-                        className="bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600 text-white border-0"
-                      >
-                        <UserPlus className="h-4 w-4 mr-2" />
-                        Sign Up
-                      </Button>
-                    </NavigationLink>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-white/70 text-sm">
-                      Welcome, {user?.username || 'User'}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleSignOut}
-                      className="text-white/70 hover:text-white hover:bg-white/5"
-                    >
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Sign Out
-                    </Button>
-                  </>
-                )}
-                {/* Sidebar trigger for authenticated users */}
-                {isAuthenticated && (
-                  <Sheet open={isOpen} onOpenChange={setIsOpen}>
-                    <SheetTrigger asChild>
+                {isSignedIn || isAuthenticated ? (
+                  <div className="flex items-center space-x-3">
+                    <UserButton 
+                      afterSignOutUrl="/"
+                      appearance={{
+                        elements: {
+                          avatarBox: "w-8 h-8",
+                        },
+                      }}
+                    />
+                    <SignOutButton>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="text-white/70 hover:text-white hover:bg-white/5"
+                        className="text-gray-300 hover:text-white hover:bg-white/10"
                       >
-                        <Menu className="h-4 w-4" />
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Sign Out
                       </Button>
-                    </SheetTrigger>
-                    <SheetContent side="right" className="w-80 bg-black/95 border-white/10">
-                      <div className="flex items-center justify-between mb-6">
-                        <div className="flex items-center space-x-2">
-                          <MessageSquare className="h-6 w-6 text-cyan-400" />
-                          <span className="text-lg font-bold text-white">AskMe</span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setIsOpen(false)}
-                          className="text-white/70 hover:text-white"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      {/* Sidebar Navigation */}
-                      <nav className="space-y-2">
-                        {privateNavigationItems
-                          .filter(item => !item.requiresAuth || isAuthenticated)
-                          .map((item) => {
-                            const Icon = item.icon;
-                            return (
-                              <NavigationLink
-                                key={item.name}
-                                href={item.href}
-                                onClick={() => setIsOpen(false)}
-                                className={`flex items-center space-x-3 px-3 py-3 rounded-lg transition-all duration-200 ${
-                                  isActive(item.href)
-                                    ? 'bg-white/10 text-white'
-                                    : 'text-white/70 hover:text-white hover:bg-white/5'
-                                }`}
-                              >
-                                <Icon className="h-5 w-5" />
-                                <div>
-                                  <div className="font-medium">{item.name}</div>
-                                  <div className="text-xs text-white/50">{item.description}</div>
-                                </div>
-                              </NavigationLink>
-                            );
-                          })}
-                      </nav>
-                    </SheetContent>
-                  </Sheet>
+                    </SignOutButton>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-3">
+                    <SignInButton mode="modal">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-gray-300 hover:text-white hover:bg-white/10"
+                      >
+                        Sign In
+                      </Button>
+                    </SignInButton>
+                    <Link href="/signup">
+                      <Button
+                        size="sm"
+                        className="bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600 text-white"
+                      >
+                        Sign Up
+                      </Button>
+                    </Link>
+                  </div>
                 )}
               </>
             )}
           </div>
 
-          {/* Mobile Menu Button */}
+          {/* Mobile menu button */}
           <Sheet open={isOpen} onOpenChange={setIsOpen}>
             <SheetTrigger asChild>
               <Button
                 variant="ghost"
                 size="sm"
-                className="md:hidden text-white/70 hover:text-white hover:bg-white/5"
+                className="md:hidden text-white hover:bg-white/10"
               >
-                <Menu className="h-5 w-5" />
+                <Menu className="w-5 h-5" />
               </Button>
             </SheetTrigger>
             <SheetContent side="right" className="w-80 bg-black/95 border-white/10">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center space-x-2">
-                  <MessageSquare className="h-6 w-6 text-cyan-400" />
-                  <span className="text-lg font-bold text-white">AskMe</span>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsOpen(false)}
-                  className="text-white/70 hover:text-white"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-
-              {/* Mobile Public Navigation */}
-              <nav className="space-y-2 mb-6">
-                <div className="text-white/50 text-xs uppercase tracking-wider font-semibold mb-2">
-                  Public Pages
-                </div>
-                {publicNavigationItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <NavigationLink
-                      key={item.name}
-                      href={item.href}
-                      onClick={() => setIsOpen(false)}
-                      className={`flex items-center space-x-3 px-3 py-3 rounded-lg transition-all duration-200 ${
-                        isActive(item.href)
-                          ? 'bg-white/10 text-white'
-                          : 'text-white/70 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5" />
-                      <div>
-                        <div className="font-medium">{item.name}</div>
-                        <div className="text-xs text-white/50">{item.description}</div>
-                      </div>
-                    </NavigationLink>
-                  );
-                })}
-              </nav>
-
-              {/* Mobile Private Navigation (if authenticated) */}
-              {isAuthenticated && (
-                <nav className="space-y-2 mb-6">
-                  <div className="text-white/50 text-xs uppercase tracking-wider font-semibold mb-2">
-                    Your Account
+              <div className="flex flex-col h-full">
+                {/* Header */}
+                <div className="flex items-center justify-between pb-6 border-b border-white/10">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-8 h-8 bg-gradient-to-r from-cyan-400 to-purple-400 rounded-lg flex items-center justify-center">
+                      <MessageCircle className="w-5 h-5 text-white" />
+                    </div>
+                    <span className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+                      AskMe
+                    </span>
                   </div>
-                  {privateNavigationItems
-                    .filter(item => !item.requiresAuth || isAuthenticated)
-                    .map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <NavigationLink
-                          key={item.name}
-                          href={item.href}
-                          onClick={() => setIsOpen(false)}
-                          className={`flex items-center space-x-3 px-3 py-3 rounded-lg transition-all duration-200 ${
-                            isActive(item.href)
-                              ? 'bg-white/10 text-white'
-                              : 'text-white/70 hover:text-white hover:bg-white/5'
-                          }`}
-                        >
-                          <Icon className="h-5 w-5" />
-                          <div>
-                            <div className="font-medium">{item.name}</div>
-                            <div className="text-xs text-white/50">{item.description}</div>
-                          </div>
-                        </NavigationLink>
-                      );
-                    })}
-                </nav>
-              )}
+                </div>
 
-              {/* Mobile Auth Buttons */}
-              <div className="space-y-2 pt-4 border-t border-white/10">
-                {!isLoading && (
-                  <>
-                    {!isAuthenticated ? (
-                      <>
-                        <NavigationLink href="/login" onClick={() => setIsOpen(false)}>
-                          <Button
-                            variant="outline"
-                            className="w-full justify-start bg-white/5 border-white/20 text-white hover:bg-white/10"
-                          >
-                            <LogIn className="h-4 w-4 mr-2" />
-                            Sign In
-                          </Button>
-                        </NavigationLink>
-                        <NavigationLink href="/signup" onClick={() => setIsOpen(false)}>
-                          <Button
-                            variant="default"
-                            className="w-full justify-start bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600 text-white border-0"
-                          >
-                            <UserPlus className="h-4 w-4 mr-2" />
-                            Sign Up
-                          </Button>
-                        </NavigationLink>
-                      </>
-                    ) : (
-                      <>
-                        <div className="px-3 py-2 text-white/70 text-sm">
-                          Welcome, {user?.username || 'User'}
+                {/* Navigation Items */}
+                <div className="flex-1 py-6">
+                  <div className="space-y-2">
+                    {navItems.map((item) => (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={closeSheet}
+                        className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                          isActive(item.href)
+                            ? 'bg-white/10 text-white'
+                            : 'text-gray-300 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        <item.icon className="w-5 h-5" />
+                        <div>
+                          <div>{item.label}</div>
+                          <div className="text-xs text-gray-400">{item.description}</div>
                         </div>
-                        <Button
-                          variant="ghost"
-                          onClick={handleSignOut}
-                          className="w-full justify-start text-white/70 hover:text-white hover:bg-white/5"
-                        >
-                          <LogOut className="h-4 w-4 mr-2" />
-                          Sign Out
-                        </Button>
-                      </>
-                    )}
-                  </>
-                )}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Mobile Auth */}
+                <div className="border-t border-white/10 pt-6">
+                  {isLoaded && (
+                    <>
+                      {isSignedIn || isAuthenticated ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center space-x-3 px-4 py-2">
+                            <UserButton 
+                              afterSignOutUrl="/"
+                              appearance={{
+                                elements: {
+                                  avatarBox: "w-8 h-8",
+                                },
+                              }}
+                            />
+                            <span className="text-white text-sm">Account</span>
+                          </div>
+                          <SignOutButton>
+                            <Button
+                              variant="ghost"
+                              className="w-full justify-start text-gray-300 hover:text-white hover:bg-white/10"
+                              onClick={closeSheet}
+                            >
+                              <LogOut className="w-4 h-4 mr-3" />
+                              Sign Out
+                            </Button>
+                          </SignOutButton>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <SignInButton mode="modal">
+                            <Button
+                              variant="ghost"
+                              className="w-full justify-start text-gray-300 hover:text-white hover:bg-white/10"
+                              onClick={closeSheet}
+                            >
+                              Sign In
+                            </Button>
+                          </SignInButton>
+                          <Link href="/signup" onClick={closeSheet}>
+                            <Button
+                              className="w-full bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600 text-white"
+                            >
+                              Sign Up
+                            </Button>
+                          </Link>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </SheetContent>
           </Sheet>
         </div>
       </div>
-    </header>
+    </nav>
   );
 }

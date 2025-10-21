@@ -30,14 +30,14 @@ import { formatDistanceToNow } from 'date-fns';
 
 interface UserProfile {
   id: string;
+  user_id: string;
   username: string;
   display_name: string;
   bio?: string;
   avatar_url?: string;
   created_at: string;
-  is_public: boolean;
-  total_questions: number;
-  answered_questions: number;
+  total_questions?: number;
+  answered_questions?: number;
 }
 
 interface PublicQuestion {
@@ -72,10 +72,9 @@ export default function UserAMAPage() {
       
       // Fetch user profile
       const { data: profile, error: profileError } = await supabase
-        .from('user_profiles')
+        .from('creator_profiles')
         .select('*')
         .eq('username', username)
-        .eq('is_public', true)
         .single();
 
       if (profileError || !profile) {
@@ -89,7 +88,7 @@ export default function UserAMAPage() {
       const { data: questions, error: questionsError } = await supabase
         .from('questions')
         .select('id, question_text, answer_text, is_answered, created_at, answered_at')
-        .eq('user_id', profile.id)
+        .eq('creator_username', profile.username)
         .eq('is_answered', true)
         .eq('is_public', true)
         .order('answered_at', { ascending: false })
@@ -184,7 +183,7 @@ export default function UserAMAPage() {
             <div className="text-center space-y-6 animate-float">
               <div className="flex flex-col items-center space-y-4">
                 <Avatar className="h-24 w-24 border-4 border-white/20">
-                  <AvatarImage src={userProfile.avatar_url} />
+                  <AvatarImage src={userProfile.profile_image_url} />
                   <AvatarFallback className="bg-white/10 text-white text-2xl">
                     {userProfile.display_name[0]?.toUpperCase()}
                   </AvatarFallback>
@@ -209,11 +208,11 @@ export default function UserAMAPage() {
                   </div>
                   <div className="flex items-center space-x-1">
                     <MessageSquare className="h-4 w-4" />
-                    <span>{userProfile.total_questions} questions</span>
+                    <span>{userProfile.total_questions || 0} questions</span>
                   </div>
                   <div className="flex items-center space-x-1">
                     <CheckCircle className="h-4 w-4" />
-                    <span>{userProfile.answered_questions} answered</span>
+                    <span>{userProfile.answered_questions || 0} answered</span>
                   </div>
                 </div>
 
@@ -239,7 +238,7 @@ export default function UserAMAPage() {
               </div>
               
               <QuestionForm 
-                targetUserId={userProfile.id} 
+                targetUserId={userProfile.user_id} 
                 targetUsername={userProfile.username}
               />
             </div>

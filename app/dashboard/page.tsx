@@ -1,67 +1,122 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useSession } from 'next-auth/react';
-import { useAuth, useUser } from '@clerk/nextjs';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
-import { GlassmorphicCard3D } from '@/components/glassmorphic-card-3d';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useRouter } from 'next/navigation';
+import { useAuth, SignOutButton, useUser } from '@clerk/nextjs';
+import { useAuth as useAppAuth } from '@/lib/auth/auth-context';
+import { createClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
+import { Toaster } from 'react-hot-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import toast, { Toaster } from 'react-hot-toast';
-import {
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { 
+  MessageCircle, 
   MessageSquare,
-  Clock,
-  MapPin,
-  Monitor,
+  Users, 
+  TrendingUp, 
+  Clock, 
+  Settings, 
+  Plus,
+  BarChart3,
+  Eye,
+  Heart,
+  Share2,
+  MoreHorizontal,
+  Edit,
+  Trash2,
   ExternalLink,
+  Copy,
+  Download,
+  Filter,
+  Search,
+  Calendar,
+  Star,
+  AlertCircle,
   CheckCircle,
   XCircle,
-  RefreshCw,
-  TrendingUp,
-  User,
-  Settings,
   LogOut,
-  Shield,
-  BarChart3,
-  Users,
-  Eye,
-  Calendar,
-  Plus
+  RefreshCw,
+  MapPin,
+  User
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import Link from 'next/link';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { 
+  Dialog, 
+  DialogContent, 
+  DialogDescription, 
+  DialogHeader, 
+  DialogTitle, 
+  DialogTrigger 
+} from '@/components/ui/dialog';
+import { 
+  DropdownMenu, 
+  DropdownMenuContent, 
+  DropdownMenuItem, 
+  DropdownMenuTrigger 
+} from '@/components/ui/dropdown-menu';
+import { Separator } from '@/components/ui/separator';
+import { Progress } from '@/components/ui/progress';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface Question {
   id: string;
-  question: string;
-  answer?: string;
-  status: 'pending' | 'answered';
+  content: string;
   created_at: string;
-  source: string;
-  referrer?: string;
-  user_agent?: string;
-  user_id?: string;
+  is_answered: boolean;
+  answer?: string;
+  answered_at?: string;
+  creator_profile_id: string;
+  likes_count: number;
+  views_count: number;
+  is_anonymous: boolean;
+  tags: string[];
+  status: 'pending' | 'answered' | 'archived';
 }
 
-interface UserStats {
-  totalQuestions: number;
-  answeredQuestions: number;
-  pendingQuestions: number;
-  totalViews: number;
-  thisWeekQuestions: number;
-  responseRate: number;
+interface CreatorProfile {
+  id: string;
+  username: string;
+  display_name: string;
+  bio: string;
+  avatar_url: string;
+  social_links: Record<string, string>;
+  is_verified: boolean;
+  created_at: string;
+  total_questions: number;
+  answered_questions: number;
+  total_views: number;
+  total_likes: number;
 }
 
-export default function Dashboard() {
+export default function DashboardPage() {
+  const { isSignedIn, userId } = useAuth();
+  const { user: clerkUser } = useUser();
+  const { user, isAuthenticated } = useAppAuth();
+  const router = useRouter();
+
+  // Define currentUserId and currentUser
+  const currentUserId = userId;
+  const currentUser = clerkUser;
+
+  // State variables
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
-  const [answers, setAnswers] = useState<{ [key: string]: string }>({});
-  const [answeringId, setAnsweringId] = useState<string | null>(null);
-  const [userStats, setUserStats] = useState<UserStats>({
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [activeTab, setActiveTab] = useState('overview');
+  const [userStats, setUserStats] = useState({
     totalQuestions: 0,
     answeredQuestions: 0,
     pendingQuestions: 0,
@@ -69,32 +124,20 @@ export default function Dashboard() {
     thisWeekQuestions: 0,
     responseRate: 0
   });
-  const [activeTab, setActiveTab] = useState('overview');
-  
-  // Authentication hooks
-  const { data: session } = useSession();
-  const { isSignedIn, userId: clerkUserId } = useAuth();
-  const { user: clerkUser } = useUser();
-  const router = useRouter();
-  
-  const supabase = createClient();
-  
-  // Get current user info
-  const currentUser = session?.user || clerkUser;
-  const currentUserId = (session?.user as any)?.id || clerkUserId;
-  
-  // Redirect if not authenticated
-  useEffect(() => {
-    if (!session && !isSignedIn) {
-      router.push('/login');
-    }
-  }, [session, isSignedIn, router]);
+  const [stats, setStats] = useState({
+    total: 0,
+    answered: 0,
+    pending: 0,
+    thisWeek: 0,
+    responseRate: 0
+  });
 
   const fetchQuestions = async () => {
     if (!currentUserId) return;
     
     try {
       setLoading(true);
+      const supabase = createClient();
       const { data, error } = await supabase
         .from('questions')
         .select('*')
@@ -157,8 +200,15 @@ export default function Dashboard() {
   }, [currentUserId]);
 
   useEffect(() => {
-    if (!currentUserId) return;
-    
+    if (!isAuthenticated || !currentUserId) {
+      router.push('/login');
+      return;
+    }
+
+    fetchQuestions();
+
+    // Set up real-time subscription
+    const supabase = createClient();
     const channel = supabase
       .channel('questions_changes')
       .on(
@@ -176,7 +226,7 @@ export default function Dashboard() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      channel.unsubscribe();
     };
   }, [currentUserId]);
 
@@ -188,6 +238,7 @@ export default function Dashboard() {
     }
 
     try {
+      const supabase = createClient();
       const { error } = await supabase
         .from('questions')
         .update({
@@ -214,7 +265,7 @@ export default function Dashboard() {
   };
 
   // Show loading or redirect if not authenticated
-  if (!session && !isSignedIn) {
+  if (!isSignedIn) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 flex items-center justify-center">
         <div className="text-white text-center">
@@ -224,16 +275,6 @@ export default function Dashboard() {
       </div>
     );
   }
-
-  const handleSignOut = () => {
-    if (session) {
-      // NextAuth sign out
-      window.location.href = '/api/auth/signout';
-    } else {
-      // Clerk sign out
-      router.push('/');
-    }
-  };
 
   const StatCard = ({ title, value, icon: Icon, trend, trendValue }: {
     title: string;
@@ -290,14 +331,15 @@ export default function Dashboard() {
               <MessageSquare className="h-4 w-4 mr-2" />
               Chat
             </Button>
-            <Button
-              onClick={handleSignOut}
-              variant="outline"
-              className="bg-white/5 hover:bg-white/10 text-white border-white/20"
-            >
-              <LogOut className="h-4 w-4 mr-2" />
-              Sign Out
-            </Button>
+            <SignOutButton>
+              <Button
+                variant="outline"
+                className="bg-white/5 hover:bg-white/10 text-white border-white/20"
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Sign Out
+              </Button>
+            </SignOutButton>
           </div>
         </div>
 
@@ -562,14 +604,15 @@ export default function Dashboard() {
                       <Users className="h-4 w-4 mr-2" />
                       Community Threads
                     </Button>
-                    <Button
-                      onClick={handleSignOut}
-                      variant="outline"
-                      className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/20 justify-start"
-                    >
-                      <LogOut className="h-4 w-4 mr-2" />
-                      Sign Out
-                    </Button>
+                    <SignOutButton>
+                      <Button
+                        variant="outline"
+                        className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/20 justify-start"
+                      >
+                        <LogOut className="h-4 w-4 mr-2" />
+                        Sign Out
+                      </Button>
+                    </SignOutButton>
                   </div>
                 </div>
               </CardContent>

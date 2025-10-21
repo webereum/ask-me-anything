@@ -1,267 +1,142 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { useUser as useClerkUser } from '@clerk/nextjs';
-import { useSession } from 'next-auth/react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useUser, useAuth as useClerkAuth } from '@clerk/nextjs';
 import { createClient } from '@/lib/supabase/client';
 
 interface User {
   id: string;
   email?: string;
-  username: string;
-  avatar_url?: string;
-  is_anonymous: boolean;
-  is_online: boolean;
+  name?: string;
+  image?: string;
+  username?: string;
 }
 
 interface AuthContextType {
   user: User | null;
-  isLoading: boolean;
   isAuthenticated: boolean;
+  isLoading: boolean;
   signOut: () => Promise<void>;
-  createAnonymousUser: (username?: string) => Promise<User>;
-  updateUserStatus: (isOnline: boolean) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 interface AuthProviderProps {
-  children: ReactNode;
-  authProvider?: 'clerk' | 'nextauth';
+  children: React.ReactNode;
 }
 
-export function AuthProvider({ children, authProvider = 'clerk' }: AuthProviderProps) {
+export function AuthProvider({ children }: AuthProviderProps) {
+  const { user: clerkUser, isLoaded: clerkLoaded } = useUser();
+  const { signOut: clerkSignOut } = useClerkAuth();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // Clerk hooks
-  const { user: clerkUser, isLoaded: clerkLoaded } = useClerkUser();
-  
-  // NextAuth hooks
-  const { data: session, status: sessionStatus } = useSession();
-  
-  const supabase = createClient();
 
-  // Generate random username for anonymous users
-  const generateAnonymousUsername = () => {
-    const adjectives = ['Cool', 'Swift', 'Bright', 'Clever', 'Quick', 'Smart', 'Bold', 'Calm'];
-    const nouns = ['Fox', 'Eagle', 'Wolf', 'Lion', 'Tiger', 'Bear', 'Hawk', 'Owl'];
-    const adjective = adjectives[Math.floor(Math.random() * adjectives.length)];
-    const noun = nouns[Math.floor(Math.random() * nouns.length)];
-    const number = Math.floor(Math.random() * 1000);
-    return `${adjective}${noun}${number}`;
-  };
+  // Sync chat user with Supabase when Clerk user changes
+  const syncChatUser = async (clerkUser: any) => {
+    if (!clerkUser) return;
 
-  // Create or get chat user from database
-  const syncChatUser = async (authUserId?: string, userData?: any) => {
     try {
-      let chatUser;
-      
-      if (authUserId) {
-        // Authenticated user
-        const { data: existingUser } = await supabase
-          .from('chat_users')
-          .select('*')
-          .eq('auth_user_id', authUserId)
-          .single();
+      const supabase = createClient();
+      // Check if chat user already exists
+      const { data: existingUser, error: fetchError } = await supabase
+        .from('chat_users')
+        .select('*')
+        .eq('auth_user_id', clerkUser.id)
+        .single();
 
-        if (existingUser) {
-          chatUser = existingUser;
-        } else {
-          // Create new chat user
-          const { data: newUser, error } = await supabase
-            .from('chat_users')
-            .insert({
-              auth_user_id: authUserId,
-              username: userData?.username || userData?.name || userData?.email?.split('@')[0] || 'User',
-              is_anonymous: false,
-              avatar_url: userData?.avatar_url || userData?.image,
-              is_online: true,
-            })
-            .select()
-            .single();
-
-          if (error) throw error;
-          chatUser = newUser;
-        }
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('Error fetching chat user:', fetchError);
+        return;
       }
 
-      if (chatUser) {
-        setUser({
-          id: chatUser.id,
-          email: userData?.email,
-          username: chatUser.username,
-          avatar_url: chatUser.avatar_url,
-          is_anonymous: chatUser.is_anonymous,
-          is_online: chatUser.is_online,
-        });
+      if (!existingUser) {
+        // Create new chat user
+        const username = clerkUser.username || 
+                        clerkUser.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 
+                        `user_${clerkUser.id.slice(-8)}`;
+
+        const { error: insertError } = await supabase
+          .from('chat_users')
+          .insert({
+            auth_user_id: clerkUser.id,
+            username: username,
+            is_anonymous: false,
+            avatar_url: clerkUser.imageUrl,
+            is_online: true
+          });
+
+        if (insertError) {
+          console.error('Error creating chat user:', insertError);
+        }
+      } else {
+        // Update existing user's online status and avatar
+        const { error: updateError } = await supabase
+          .from('chat_users')
+          .update({
+            is_online: true,
+            avatar_url: clerkUser.imageUrl,
+            last_seen: new Date().toISOString()
+          })
+          .eq('auth_user_id', clerkUser.id);
+
+        if (updateError) {
+          console.error('Error updating chat user:', updateError);
+        }
       }
     } catch (error) {
       console.error('Error syncing chat user:', error);
     }
   };
 
-  // Create anonymous user
-  const createAnonymousUser = async (username?: string): Promise<User> => {
-    try {
-      const anonymousUsername = username || generateAnonymousUsername();
-      
-      const { data: newUser, error } = await supabase
-        .from('chat_users')
-        .insert({
-          username: anonymousUsername,
-          is_anonymous: true,
-          is_online: true,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      const anonymousUser: User = {
-        id: newUser.id,
-        username: newUser.username,
-        avatar_url: newUser.avatar_url,
-        is_anonymous: true,
-        is_online: true,
-      };
-
-      setUser(anonymousUser);
-      
-      // Store anonymous user in localStorage
-      localStorage.setItem('anonymous_user', JSON.stringify(anonymousUser));
-      
-      return anonymousUser;
-    } catch (error) {
-      console.error('Error creating anonymous user:', error);
-      throw error;
-    }
-  };
-
-  // Update user online status
-  const updateUserStatus = async (isOnline: boolean) => {
-    if (!user) return;
-
-    try {
-      await supabase
-        .from('chat_users')
-        .update({ 
-          is_online: isOnline,
-          last_seen: new Date().toISOString(),
-        })
-        .eq('id', user.id);
-
-      setUser(prev => prev ? { ...prev, is_online: isOnline } : null);
-    } catch (error) {
-      console.error('Error updating user status:', error);
-    }
-  };
-
-  // Sign out function
   const signOut = async () => {
     try {
+      // Update chat user status to offline before signing out
       if (user) {
-        await updateUserStatus(false);
+        const supabase = createClient();
+        await supabase
+          .from('chat_users')
+          .update({
+            is_online: false,
+            last_seen: new Date().toISOString()
+          })
+          .eq('auth_user_id', user.id);
       }
 
-      if (authProvider === 'clerk' && clerkUser) {
-        // Clerk sign out is handled by Clerk components
-      } else if (authProvider === 'nextauth') {
-        const { signOut: nextAuthSignOut } = await import('next-auth/react');
-        await nextAuthSignOut();
-      }
-
-      // Clear anonymous user from localStorage
-      localStorage.removeItem('anonymous_user');
+      // Sign out from Clerk
+      await clerkSignOut();
       setUser(null);
     } catch (error) {
       console.error('Error signing out:', error);
     }
   };
 
-  // Effect to handle authentication state changes
   useEffect(() => {
-    const handleAuth = async () => {
-      setIsLoading(true);
-
-      try {
-        if (authProvider === 'clerk' && clerkLoaded) {
-          if (clerkUser) {
-            await syncChatUser(clerkUser.id, {
-              username: clerkUser.username,
-              name: clerkUser.fullName,
-              email: clerkUser.primaryEmailAddress?.emailAddress,
-              avatar_url: clerkUser.imageUrl,
-            });
-          } else {
-            // Check for anonymous user in localStorage
-            const storedAnonymousUser = localStorage.getItem('anonymous_user');
-            if (storedAnonymousUser) {
-              const anonymousUser = JSON.parse(storedAnonymousUser);
-              setUser(anonymousUser);
-            } else {
-              setUser(null);
-            }
-          }
-        } else if (authProvider === 'nextauth' && sessionStatus !== 'loading') {
-          if (session?.user) {
-            await syncChatUser((session.user as any).id, {
-              name: session.user.name,
-              email: session.user.email,
-              avatar_url: session.user.image,
-            });
-          } else {
-            // Check for anonymous user in localStorage
-            const storedAnonymousUser = localStorage.getItem('anonymous_user');
-            if (storedAnonymousUser) {
-              const anonymousUser = JSON.parse(storedAnonymousUser);
-              setUser(anonymousUser);
-            } else {
-              setUser(null);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Auth handling error:', error);
+    if (clerkLoaded) {
+      if (clerkUser) {
+        // User is authenticated with Clerk
+        const userData: User = {
+          id: clerkUser.id,
+          email: clerkUser.emailAddresses?.[0]?.emailAddress,
+          name: clerkUser.fullName || clerkUser.firstName || undefined,
+          image: clerkUser.imageUrl,
+          username: clerkUser.username || undefined
+        };
+        
+        setUser(userData);
+        syncChatUser(clerkUser);
+      } else {
+        // User is not authenticated
         setUser(null);
-      } finally {
-        setIsLoading(false);
       }
-    };
-
-    handleAuth();
-  }, [clerkUser, clerkLoaded, session, sessionStatus, authProvider]);
-
-  // Handle page visibility for online status
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (user && !user.is_anonymous) {
-        updateUserStatus(!document.hidden);
-      }
-    };
-
-    const handleBeforeUnload = () => {
-      if (user && !user.is_anonymous) {
-        updateUserStatus(false);
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [user]);
+      setIsLoading(false);
+    }
+  }, [clerkUser, clerkLoaded]);
 
   const value: AuthContextType = {
     user,
-    isLoading,
     isAuthenticated: !!user,
+    isLoading,
     signOut,
-    createAnonymousUser,
-    updateUserStatus,
   };
 
   return (

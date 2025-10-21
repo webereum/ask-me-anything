@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useSession } from 'next-auth/react';
 import { useAuth, useUser } from '@clerk/nextjs';
+import { useAuth as useAppAuth } from '@/lib/auth/auth-context';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,17 +23,17 @@ export default function CreateAMAPage() {
   const [existingProfile, setExistingProfile] = useState<any>(null);
   
   const router = useRouter();
-  const { data: session } = useSession();
   const { isSignedIn, userId } = useAuth();
   const { user } = useUser();
 
   // Determine current user and authentication state
-  const currentUser = session?.user || user;
-  const currentUserId = (session?.user as any)?.id || userId;
-  const isAuthenticated = !!session || isSignedIn;
+  const currentUser = user;
+  const currentUserId = userId;
+
+  console.log('Auth state:', { isSignedIn, userId, user: currentUser });
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!isSignedIn) {
       router.push('/login');
       return;
     }
@@ -41,16 +41,16 @@ export default function CreateAMAPage() {
     // Pre-fill form with user data
     if (currentUser) {
       const userAny = currentUser as any;
-      setDisplayName(userAny.name || userAny.firstName + ' ' + (userAny.lastName || '') || '');
+      setDisplayName(userAny.fullName || userAny.firstName + ' ' + (userAny.lastName || '') || '');
       
       // Generate username suggestion
-      const namePart = (userAny.name || userAny.firstName || '').toLowerCase().replace(/\s+/g, '');
+      const namePart = (userAny.fullName || userAny.firstName || '').toLowerCase().replace(/\s+/g, '');
       const randomNum = Math.floor(Math.random() * 1000);
       setUsername(`${namePart}${randomNum}`);
     }
 
     checkExistingProfile();
-  }, [isAuthenticated, currentUser, currentUserId, router]);
+  }, [isSignedIn, currentUser, currentUserId, router]);
 
   const checkExistingProfile = async () => {
     if (!currentUserId) return;
@@ -58,14 +58,14 @@ export default function CreateAMAPage() {
     try {
       const supabase = createClient();
       const { data, error } = await supabase
-        .from('user_profiles')
+        .from('creator_profiles')
         .select('*')
         .eq('user_id', currentUserId)
         .single();
 
       if (data) {
         setExistingProfile(data);
-        setUsername(data.username);
+        setUsername(data.username || '');
         setDisplayName(data.display_name);
         setBio(data.bio || '');
       }
@@ -82,7 +82,7 @@ export default function CreateAMAPage() {
     try {
       const supabase = createClient();
       const { data, error } = await supabase
-        .from('user_profiles')
+        .from('creator_profiles')
         .select('username')
         .eq('username', usernameToCheck.toLowerCase())
         .neq('user_id', currentUserId);
@@ -96,6 +96,13 @@ export default function CreateAMAPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+
+    console.log('=== CREATE AMA FORM SUBMISSION ===');
+    console.log('Current User ID:', currentUserId);
+    console.log('Username:', username);
+    console.log('Display Name:', displayName);
+    console.log('Bio:', bio);
+    console.log('Existing Profile:', existingProfile);
 
     if (!username || username.length < 3) {
       toast.error('Username must be at least 3 characters long');
@@ -111,7 +118,9 @@ export default function CreateAMAPage() {
 
     // Check username availability (skip if updating existing profile with same username)
     if (!existingProfile || existingProfile.username !== username.toLowerCase()) {
+      console.log('Checking username availability for:', username);
       const isAvailable = await checkUsernameAvailability(username);
+      console.log('Username available:', isAvailable);
       if (!isAvailable) {
         toast.error('Username is already taken. Please choose another one.');
         setIsSubmitting(false);
@@ -121,39 +130,78 @@ export default function CreateAMAPage() {
 
     try {
       const supabase = createClient();
+      console.log('Supabase client created');
       
       const profileData = {
         user_id: currentUserId,
         username: username.toLowerCase(),
         display_name: displayName,
-        bio: bio || null,
-        avatar_url: (currentUser as any)?.image || (currentUser as any)?.imageUrl || null,
-        email: (currentUser as any)?.email || (currentUser as any)?.emailAddresses?.[0]?.emailAddress || null,
+        bio: bio,
+        avatar_url: currentUser?.imageUrl || null,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
       };
+
+      console.log('Profile data to save:', profileData);
 
       let result;
       if (existingProfile) {
+        console.log('Updating existing profile...');
         // Update existing profile
         result = await supabase
-          .from('user_profiles')
+          .from('creator_profiles')
           .update({
             username: profileData.username,
             display_name: profileData.display_name,
             bio: profileData.bio,
             avatar_url: profileData.avatar_url,
-            updated_at: profileData.updated_at,
           })
           .eq('user_id', currentUserId);
       } else {
+        console.log('Creating new profile...');
         // Create new profile
         result = await supabase
-          .from('user_profiles')
-          .insert([profileData]);
+          .from('creator_profiles')
+          .insert([{
+            user_id: profileData.user_id,
+            username: profileData.username,
+            display_name: profileData.display_name,
+            bio: profileData.bio,
+            avatar_url: profileData.avatar_url,
+            created_at: profileData.created_at,
+          }]);
       }
 
-      if (result.error) throw result.error;
+      console.log('Database operation result:', result);
+
+      if (result.error) {
+        console.error('Database error:', result.error);
+        
+        // Check for specific UUID error and provide helpful message
+        if (result.error.message?.includes('invalid input syntax for type uuid')) {
+          toast.error('Database configuration issue detected. Please contact support or check the database schema. The user_id column needs to be TEXT type, not UUID.', {
+            style: {
+              background: 'rgba(239, 68, 68, 0.9)',
+              color: '#fff',
+              backdropFilter: 'blur(10px)',
+            },
+            duration: 8000,
+          });
+          console.error('🔧 Schema fix needed: ALTER TABLE creator_profiles ALTER COLUMN user_id TYPE TEXT;');
+        } else {
+          toast.error(`Database error: ${result.error.message}`, {
+            style: {
+              background: 'rgba(239, 68, 68, 0.9)',
+              color: '#fff',
+              backdropFilter: 'blur(10px)',
+            },
+          });
+        }
+        
+        setIsSubmitting(false);
+        return;
+      }
+
+      console.log('Profile saved successfully!');
 
       toast.success(existingProfile ? 'Profile updated successfully!' : 'AMA page created successfully!', {
         icon: '🎉',
@@ -165,17 +213,43 @@ export default function CreateAMAPage() {
       });
 
       // Redirect to the user's AMA page
+      console.log('Redirecting to:', `/u/${username.toLowerCase()}`);
       router.push(`/u/${username.toLowerCase()}`);
 
     } catch (error) {
-      console.error('Error:', error);
-      toast.error('Failed to save profile. Please try again.', {
-        style: {
-          background: 'rgba(239, 68, 68, 0.9)',
-          color: '#fff',
-          backdropFilter: 'blur(10px)',
-        },
-      });
+      console.error('=== CREATE AMA ERROR ===');
+      console.error('Error type:', typeof error);
+      console.error('Error message:', error?.message || 'Unknown error');
+      console.error('Full error object:', error);
+      console.error('Error stack:', error?.stack);
+      
+      // Provide specific error messages for common issues
+      if (error?.message?.includes('invalid input syntax for type uuid')) {
+        toast.error('Database schema issue: The database expects a different user ID format. Please contact support.', {
+          style: {
+            background: 'rgba(239, 68, 68, 0.9)',
+            color: '#fff',
+            backdropFilter: 'blur(10px)',
+          },
+          duration: 8000,
+        });
+      } else if (error?.message?.includes('duplicate key value')) {
+        toast.error('This username is already taken. Please choose a different one.', {
+          style: {
+            background: 'rgba(239, 68, 68, 0.9)',
+            color: '#fff',
+            backdropFilter: 'blur(10px)',
+          },
+        });
+      } else {
+        toast.error(error?.message || 'Failed to save profile. Please try again.', {
+          style: {
+            background: 'rgba(239, 68, 68, 0.9)',
+            color: '#fff',
+            backdropFilter: 'blur(10px)',
+          },
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -189,7 +263,7 @@ export default function CreateAMAPage() {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!isSignedIn) {
     return null;
   }
 

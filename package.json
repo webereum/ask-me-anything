@@ -63,7 +63,6 @@
     "input-otp": "^1.2.4",
     "lucide-react": "^0.446.0",
     "next": "^14.2.25",
-    "next-auth": "^4.24.11",
     "next-themes": "^0.3.0",
     "postcss": "8.4.30",
     "pusher-js": "^8.4.0",

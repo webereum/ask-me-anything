@@ -1,19 +1,29 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Heart, MessageCircle, Share, MoreHorizontal, Plus, Filter, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { GlassmorphicCard3D } from '@/components/glassmorphic-card-3d';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Separator } from '@/components/ui/separator';
+import { 
+  MessageSquare, 
+  Heart, 
+  Share2, 
+  MoreHorizontal, 
+  Plus, 
+  TrendingUp,
+  Clock,
+  Users,
+  Search
+} from 'lucide-react';
+import { useAuth } from '@clerk/nextjs';
+import { useAuth as useAppAuth } from '@/lib/auth/auth-context';
+import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
-import { useAuth, useUser } from '@clerk/nextjs';
-import { useSession } from 'next-auth/react';
+import { formatDistanceToNow } from 'date-fns';
 
 interface Thread {
   id: string;

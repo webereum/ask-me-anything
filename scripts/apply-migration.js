@@ -14,8 +14,9 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function applyMigration() {
   try {
-    console.log('Reading migration file...');
-    const migrationPath = path.join(__dirname, '..', 'supabase-migration.sql');
+    const migrationFile = process.argv[2] || 'supabase-migration.sql';
+    console.log(`Reading migration file: ${migrationFile}...`);
+    const migrationPath = path.join(__dirname, '..', migrationFile);
     const migrationSQL = fs.readFileSync(migrationPath, 'utf8');
 
     console.log('Applying migration to Supabase...');
