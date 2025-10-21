@@ -85,6 +85,26 @@ export default function UserAMAPage() {
       setUserProfile(profile);
 
       // Fetch public answered questions
+      console.log('Fetching questions for username:', profile.username);
+      
+      // First, let's check what questions exist for this user (any status)
+      const { data: allQuestions, error: allQuestionsError } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('creator_username', profile.username);
+      
+      console.log('All questions for user:', { allQuestions, allQuestionsError });
+      
+      // Now check specifically for answered questions
+      const { data: answeredQuestions, error: answeredError } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('creator_username', profile.username)
+        .eq('is_answered', true);
+      
+      console.log('Answered questions:', { answeredQuestions, answeredError });
+      
+      // Finally, check for public answered questions
       const { data: questions, error: questionsError } = await supabase
         .from('questions')
         .select('id, question_text, answer_text, is_answered, created_at, answered_at')
@@ -94,8 +114,16 @@ export default function UserAMAPage() {
         .order('answered_at', { ascending: false })
         .limit(20);
 
-      if (!questionsError && questions) {
+      console.log('Public answered questions:', { questions, questionsError });
+
+      if (questionsError) {
+        console.error('Error fetching questions:', questionsError);
+      } else if (questions) {
+        console.log('Setting public questions:', questions);
         setPublicQuestions(questions);
+      } else {
+        console.log('No public answered questions found');
+        setPublicQuestions([]);
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -167,14 +195,15 @@ export default function UserAMAPage() {
   }
 
   return (
-    <main className="min-h-screen relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-mesh pointer-events-none" />
+    <>
+      <main className="min-h-screen relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-mesh pointer-events-none" />
 
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl animate-glow" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-glow" style={{ animationDelay: '2s' }} />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-3xl animate-pulse" />
-      </div>
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl animate-glow" />
+          <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-glow" style={{ animationDelay: '2s' }} />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500/5 rounded-full blur-3xl animate-pulse" />
+        </div>
 
       <div className="relative z-10 flex flex-col min-h-screen pt-16">
         <div className="flex-1 p-4 md:p-8">
@@ -216,13 +245,22 @@ export default function UserAMAPage() {
                   </div>
                 </div>
 
-                <Button
-                  onClick={handleShare}
-                  className="bg-white/10 hover:bg-white/20 text-white border-white/20"
-                >
-                  <Share2 className="h-4 w-4 mr-2" />
-                  Share Profile
-                </Button>
+                <div className="flex items-center space-x-4">
+                  <Button
+                    onClick={() => window.open('/chat', '_blank')}
+                    className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white px-6 py-2 rounded-lg shadow-lg hover:shadow-xl transition-all duration-300"
+                  >
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                    Live Chat
+                  </Button>
+                  
+                  <Button
+                    onClick={handleShare}
+                    className="bg-white/10 hover:bg-white/20 text-white border-white/20"
+                  >
+                    <Share2 className="h-4 w-4 mr-2" />
+                    Share Profile
+                  </Button>
               </div>
             </div>
 
@@ -332,6 +370,7 @@ export default function UserAMAPage() {
           </div>
         </footer>
       </div>
+        </div>
 
       <Toaster
         position="bottom-center"
@@ -344,6 +383,7 @@ export default function UserAMAPage() {
           },
         }}
       />
-    </main>
+      </main>
+    </>
   );
 }

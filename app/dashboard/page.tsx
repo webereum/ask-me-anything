@@ -70,6 +70,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { GlassmorphicCard3D } from '@/components/glassmorphic-card-3d';
 
 interface Question {
   id: string;
@@ -138,10 +139,26 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       const supabase = createClient();
+      
+      // First, get the user's creator profile to find their username
+      const { data: profile, error: profileError } = await supabase
+        .from('creator_profiles')
+        .select('username')
+        .eq('user_id', currentUserId)
+        .single();
+
+      if (profileError || !profile) {
+        console.error('Error fetching user profile:', profileError);
+        toast.error('Please create your AMA profile first');
+        router.push('/create-ama');
+        return;
+      }
+
+      // Now fetch questions using the creator_username
       const { data, error } = await supabase
         .from('questions')
         .select('*')
-        .eq('user_id', currentUserId)
+        .eq('creator_username', profile.username)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -156,7 +173,7 @@ export default function DashboardPage() {
         answer: q.answer_text,
         status: q.is_answered ? 'answered' : 'pending',
         created_at: q.created_at,
-        source: q.source_identifier,
+        source: q.source_identifier || 'direct',
         referrer: q.referrer,
         user_agent: q.user_agent,
         user_id: q.user_id
@@ -239,15 +256,31 @@ export default function DashboardPage() {
 
     try {
       const supabase = createClient();
+      
+      // First, get the user's creator profile to verify ownership
+      const { data: profile, error: profileError } = await supabase
+        .from('creator_profiles')
+        .select('username')
+        .eq('user_id', currentUserId)
+        .single();
+
+      if (profileError || !profile) {
+        console.error('Error fetching user profile:', profileError);
+        toast.error('Please create your AMA profile first');
+        return;
+      }
+
+      // Update the question with answer, only for questions belonging to this creator
       const { error } = await supabase
         .from('questions')
         .update({
           answer_text: answerText,
           is_answered: true,
-          answered_at: new Date().toISOString()
+          answered_at: new Date().toISOString(),
+          is_public: true
         })
         .eq('id', questionId)
-        .eq('user_id', currentUserId);
+        .eq('creator_username', profile.username);
 
       if (error) {
         console.error('Error saving answer:', error);
@@ -506,7 +539,13 @@ export default function DashboardPage() {
                             {question.referrer && (
                               <div className="flex items-center">
                                 <ExternalLink className="h-4 w-4 mr-1" />
-                                {new URL(question.referrer).hostname}
+                                {(() => {
+                                  try {
+                                    return new URL(question.referrer).hostname;
+                                  } catch {
+                                    return question.referrer;
+                                  }
+                                })()}
                               </div>
                             )}
                           </div>

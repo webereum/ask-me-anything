@@ -149,24 +149,6 @@ export function QuestionForm({ targetUserId, targetUsername }: QuestionFormProps
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="reelUrl" className="text-white/90 text-lg font-medium flex items-center gap-2">
-              <Link className="w-4 h-4" />
-              Reel URL (Optional)
-            </Label>
-            <Input
-              id="reelUrl"
-              type="url"
-              placeholder="https://www.instagram.com/reel/... or https://youtube.com/shorts/..."
-              value={reelUrl}
-              onChange={(e) => setReelUrl(e.target.value)}
-              disabled={isSubmitting}
-              className="bg-white/5 border-white/20 text-white placeholder:text-white/50 focus:border-cyan-400 focus:ring-cyan-400 text-lg rounded-xl transition-all duration-300"
-            />
-            <p className="text-xs text-white/60">
-              Share a reel or short video related to your question (Instagram, YouTube Shorts, TikTok, etc.)
-            </p>
-          </div>
 
           <Button
             type="submit"
